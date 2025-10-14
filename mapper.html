@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Circle Generator (Standalone)</title>
+    <style>
+        body { 
+            font-family: system-ui, -apple-system, Roboto, 'Segoe UI', Arial;
+            padding: 2rem;
+            line-height: 1.5;
+        }
+        .card {
+            border: 1px solid #ddd;
+            padding: 1rem;
+            border-radius: 8px;
+            max-width: 600px;
+            margin: 1rem 0;
+        }
+        label, select {
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+        #output {
+            margin-top: 1rem;
+            background: #f9f9f9;
+            padding: 1rem;
+            border-radius: 6px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+        button {
+            padding: 0.5rem 1rem;
+            margin: 0.5rem 0;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            background: #f0f0f0;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #e0e0e0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Circle Generator</h1>
+    <p>Generate a 360-point circle polygon as CSV with WKT geometry.</p>
+
+    <div class="card">
+        <label for="radius">Select radius</label>
+        <select id="radius">
+            <option value="500">500 m</option>
+            <option value="1000">1 km</option>
+            <option value="2000">2 km</option>
+            <option value="5000">5 km</option>
+            <option value="10000">10 km</option>
+            <option value="15000">15 km</option>
+            <option value="40000">40 km</option>
+            <option value="80000">80 km</option>
+            <option value="160000">160 km</option>
+        </select>
+        <button id="get">Get location and generate CSV</button>
+        <div id="output">Choose a radius and click the button.</div>
+    </div>
+
+    <script>
+        // DOM elements
+        const radiusSelect = document.getElementById('radius');
+        const getBtn = document.getElementById('get');
+        const output = document.getElementById('output');
+
+        // Helpers
+        function setOutput(text) {
+            if (output) output.textContent = text;
+        }
+
+        async function getLocation() {
+            return new Promise((resolve, reject) => {
+                if (!navigator.geolocation) {
+                    return reject(new Error('Geolocation not supported'));
+                }
+                navigator.geolocation.getCurrentPosition(resolve, reject);
+            });
+        }
+
+        // Geometry calculations
+        function destination(lat, lon, bearingDeg, distance) {
+            const R = 6371000; // Earth radius in meters
+            const δ = distance / R;
+            const θ = (bearingDeg * Math.PI) / 180;
+            const φ1 = (lat * Math.PI) / 180;
+            const λ1 = (lon * Math.PI) / 180;
+
+            const sinφ2 = Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ);
+            const φ2 = Math.asin(sinφ2);
+            const y = Math.sin(θ) * Math.sin(δ) * Math.cos(φ1);
+            const x = Math.cos(δ) - Math.sin(φ1) * sinφ2;
+            const λ2 = λ1 + Math.atan2(y, x);
+
+            const latDeg = (φ2 * 180) / Math.PI;
+            const lonDeg = (λ2 * 180) / Math.PI;
+            return { lat: latDeg, lon: lonDeg };
+        }
+
+        function generateCircleWkt(latitude, longitude, radius) {
+            const coords = [];
+            // Generate 360 points (one per degree)
+            for (let deg = 0; deg < 360; deg++) {
+                const p = destination(latitude, longitude, deg, radius);
+                // WKT expects lon lat ordering (x y)
+                coords.push([Number(p.lon.toFixed(8)), Number(p.lat.toFixed(8))]);
+            }
+            // Close the polygon by repeating first point
+            coords.push(coords[0]);
+            return `POLYGON((${coords.map(c => `${c[0]} ${c[1]}`).join(', ')}))`;
+        }
+
+        function downloadCsv(csvContent, filename) {
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute('download', filename);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+        }
+
+        // Main click handler
+        getBtn?.addEventListener('click', async () => {
+            const radius = Number(radiusSelect?.value ?? '500');
+            setOutput('Requesting location...');
+
+            try {
+                const pos = await getLocation();
+                const coords = pos.coords;
+                setOutput(`Location received:\nLatitude: ${coords.latitude}\nLongitude: ${coords.longitude}\nAccuracy: ${coords.accuracy} meters\nRadius: ${radius} meters`);
+
+                // Generate WKT
+                const wkt = generateCircleWkt(coords.latitude, coords.longitude, radius);
+
+                // Get current time in local timezone
+                const now = new Date();
+                const name = now.toLocaleString('en-AU', {
+                    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                });
+
+                // Create and download CSV
+                const csvContent = `name,WKT\n"${name}","${wkt}"\n`;
+                const filename = `circle_${now.toISOString().replace(/[:.]/g, '-')}.csv`;
+                downloadCsv(csvContent, filename);
+                
+                setOutput(`Generated CSV with:\nTimestamp: ${name}\nLatitude: ${coords.latitude}\nLongitude: ${coords.longitude}\nRadius: ${radius} meters\n\nDownload should start automatically.`);
+            } catch (err) {
+                setOutput('Error: ' + (err?.message ?? String(err)));
+            }
+        });
+
+        // Update output when selection changes
+        radiusSelect?.addEventListener('change', () => {
+            const r = radiusSelect.value;
+            setOutput(`Selected radius: ${r} meters. Click the button to generate.`);
+        });
+    </script>
+</body>
+</html>
