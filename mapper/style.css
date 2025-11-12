@@ -1,0 +1,16 @@
+html,body,#map{height:100%;width:100%;margin:0;padding:0}
+#map{position:fixed;top:0;left:0;right:0;bottom:0}
+.leaflet-container{font-family:system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial}
+.controls{position:absolute;top:10px;left:10px;z-index:1000;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px}
+
+.controls button{margin:4px 6px 4px 0;padding:6px 8px;border-radius:4px;border:1px solid #ccc;background:#fff}
+.hidden{display:none}
+
+.sidebar{position:absolute;top:10px;right:10px;z-index:1000;background:rgba(255,255,255,0.95);padding:10px;border-radius:6px;max-width:260px;min-width:180px;max-height:80vh;overflow:auto}
+.sidebar h3{margin:0 0 8px 0}
+.sidebar ul{list-style:none;padding:0;margin:0}
+.sidebar li{padding:6px 8px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between}
+.sidebar li button{margin-left:8px}
+
+#overlay{left:50%;transform:translateX(-50%);top:auto;bottom:10px}
+#overlay .controls{min-width:260px}

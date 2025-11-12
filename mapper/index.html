@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Street Mapping Animations</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="map"></div>
+  <!-- Editor UI: toolbar, overlay, sidebar -->
+  <div id="toolbar" class="controls">
+    <button id="modeToggle">Switch to Viewer</button>
+    <button id="btnCircle">Draw Circle</button>
+    <button id="btnSplit">Split Map</button>
+    <button id="btnRoute">Draw Route</button>
+    <button id="btnClear">Clear All</button>
+    <button id="btnPlayAll">Play All</button>
+    <button id="btnExport">Export</button>
+    <button id="btnImport">Import</button>
+    <input type="file" id="fileInput" accept="application/json" style="display:none" />
+  </div>
+
+  <div id="overlay" class="controls hidden">
+    <div id="overlayText">Click on the map to provide input.</div>
+    <div id="overlayInputs"></div>
+    <div style="margin-top:6px">
+      <button id="overlayStop" class="hidden">Stop</button>
+      <button id="overlayCancel">Cancel</button>
+    </div>
+  </div>
+
+  <div id="sidebar" class="sidebar hidden">
+    <h3>Animations</h3>
+    <ul id="animList"></ul>
+  </div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
