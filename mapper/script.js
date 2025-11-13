@@ -1,5 +1,5 @@
 // Simple mapping animations using Leaflet + Turf.js
-// Exposes functions: drawCircle, splitMap, drawRoute
+// Exposes functions: drawCircle, splitMap, drawRoute, dropMarker
 // Also includes an example scenario using Gold Coast stops.
 
 const map = L.map('map', {zoomControl: true}).setView([-27.9671,153.4000], 13);
@@ -12,6 +12,10 @@ const baseLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/
 
 // LayerGroup to hold all animation-drawn items so we can clear them easily
 const animationLayer = L.layerGroup().addTo(map);
+// default duration (seconds) for map movements (flyTo / fitBounds)
+const FLY_DURATION = 2.0;
+// Separate layer for keyframe visual markers so we can hide them during playback
+const keyframeLayer = L.layerGroup().addTo(map);
 // Utility: convert [lng,lat] <-> Leaflet LatLng
 function toLatLng(coord){ return L.latLng(coord[1], coord[0]); }
 function toLngLat(latlng){ return [latlng.lng, latlng.lat]; }
@@ -217,6 +221,30 @@ function drawRoute(points, speedMetersPerSecond=120, opts={}){
   });
 }
 
+// dropMarker: lnglat [lng,lat], color string (hex or css name), opts
+function dropMarker(lnglat, color='#ff0000', opts={}){
+  // normalize input similar to other helpers
+  function normalizeCoord(pt){
+    if(!pt || pt.length<2) return pt;
+    const x = Number(pt[0]), y = Number(pt[1]);
+    if(Math.abs(x) <= 90 && Math.abs(y) > 90) return [y, x];
+    return [x,y];
+  }
+  const coord = Array.isArray(lnglat) ? normalizeCoord(lnglat) : null;
+  if(!coord) return null;
+  const latlng = toLatLng(coord);
+  const marker = L.circleMarker(latlng, {
+    radius: opts.radius || 8,
+    fillColor: color || (opts.fillColor || '#ff0000'),
+    color: opts.outlineColor || '#000',
+    weight: opts.weight || 1,
+    fillOpacity: opts.fillOpacity != null ? opts.fillOpacity : 1
+  });
+  animationLayer.addLayer(marker);
+  if(opts.id) marker._animId = opts.id;
+  return marker;
+}
+
 // Example: find coordinates for named places using Nominatim (public)
 async function geocode(q){
   const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}`;
@@ -251,6 +279,27 @@ const FALLBACK_COORDS = {
 window.drawCircle = drawCircle;
 window.splitMap = splitMap;
 window.drawRoute = drawRoute;
+window.dropMarker = dropMarker;
+// placeKeyframe: capture current map center and zoom, show a small visual and return object
+function placeKeyframe(opts={}){
+  const center = map.getCenter();
+  const zoom = map.getZoom();
+  const centerCoords = [center.lng, center.lat];
+  const id = opts.id || `keyframe-${Date.now()}`;
+  // show a small visual marker at the center to indicate keyframe
+  const marker = L.circleMarker(center, {
+    radius: 6,
+    fillColor: opts.color || '#2ecc71',
+    color: opts.outlineColor || '#27ae60',
+    weight: 1,
+    fillOpacity: 0.95
+  });
+  marker._animId = id;
+  // keyframe visuals live in their own layer so they can be hidden during playback
+  keyframeLayer.addLayer(marker);
+  return {id, center: centerCoords, zoom};
+}
+window.placeKeyframe = placeKeyframe;
 
 
 // Small helper to compute turf.bearing when missing
@@ -292,25 +341,75 @@ function setMode(m){
     toolbar.querySelectorAll('button').forEach(b=>{ if(b.id!=='modeToggle') b.classList.add('hidden') });
     sidebar.classList.add('hidden');
     modeToggle.textContent = 'Switch to Editor';
+    // hide keyframe visuals in viewer/playback mode
+    if(map.hasLayer(keyframeLayer)) map.removeLayer(keyframeLayer);
     // lock map interactions for viewer mode (we still allow pan/zoom)
   } else {
     toolbar.querySelectorAll('button').forEach(b=> b.classList.remove('hidden'));
     sidebar.classList.remove('hidden');
     modeToggle.textContent = 'Switch to Viewer';
+    // ensure keyframe visuals are visible in editor
+    if(!map.hasLayer(keyframeLayer)) map.addLayer(keyframeLayer);
   }
 }
 
 modeToggle.addEventListener('click', ()=> setMode(ui.mode==='editor'?'viewer':'editor'));
 
+// Helper to move an animation entry by direction (-1 = up, +1 = down)
+function moveAnimationById(id, direction){
+  const idx = ui.animations.findIndex(a=>a.id === id);
+  if(idx < 0) return;
+  const newIdx = idx + direction;
+  if(newIdx < 0 || newIdx >= ui.animations.length) return;
+  const tmp = ui.animations[idx];
+  ui.animations[idx] = ui.animations[newIdx];
+  ui.animations[newIdx] = tmp;
+  refreshAnimList();
+}
+
 function addAnimationEntry(anim){
   const li = document.createElement('li');
-  li.textContent = `${anim.type} ${anim.id}`;
+  // textual label
+  const label = document.createElement('span');
+  label.textContent = `${anim.type} ${anim.id}`;
+  label.style.flex = '1';
+  li.appendChild(label);
+
+  // Play button: look up the current object by id at playback time
   const playBtn = document.createElement('button'); playBtn.textContent='Play';
-  playBtn.addEventListener('click', ()=> playAnimation(anim));
+  playBtn.addEventListener('click', ()=> {
+    const current = ui.animations.find(a => a.id === anim.id);
+    if(current) playAnimation(current);
+    else playAnimation(anim); // fallback
+  });
+
+  // Up / Down reorder buttons
+  const upBtn = document.createElement('button'); upBtn.textContent='↑';
+  upBtn.title = 'Move up';
+  upBtn.addEventListener('click', ()=> moveAnimationById(anim.id, -1));
+  const downBtn = document.createElement('button'); downBtn.textContent='↓';
+  downBtn.title = 'Move down';
+  downBtn.addEventListener('click', ()=> moveAnimationById(anim.id, +1));
+
+  // Delete button: remove from ui.animations, remove visual markers for that id, persist
   const delBtn = document.createElement('button'); delBtn.textContent='Delete';
-  delBtn.addEventListener('click', ()=>{ ui.animations = ui.animations.filter(a=>a.id!==anim.id); li.remove(); });
-  li.appendChild(playBtn); li.appendChild(delBtn);
+  delBtn.addEventListener('click', ()=>{
+    ui.animations = ui.animations.filter(a=>a.id!==anim.id);
+    // remove any layers in animationLayer or keyframeLayer that were created with this anim id
+    animationLayer.eachLayer(l => { if(l._animId === anim.id) animationLayer.removeLayer(l); });
+    keyframeLayer.eachLayer(l => { if(l._animId === anim.id) keyframeLayer.removeLayer(l); });
+    li.remove();
+    try{ saveAnimationsToStorage(); }catch(e){}
+  });
+
+  li.appendChild(playBtn);
+  li.appendChild(upBtn);
+  li.appendChild(downBtn);
+  li.appendChild(delBtn);
   animList.appendChild(li);
+
+  // persist immediately whenever we add a single entry
+  try{ saveAnimationsToStorage(); }catch(e){}
 }
 
 function refreshAnimList(){
@@ -402,6 +501,28 @@ document.getElementById('btnRoute').addEventListener('click', async ()=>{
   }catch(e){}
 });
 
+// Keyframe button: capture current map view immediately
+document.getElementById('btnKeyframe').addEventListener('click', ()=>{
+  try{
+    const k = placeKeyframe();
+    ui.animations.push({type:'keyframe', id: k.id, params:{center: k.center, zoom: k.zoom}});
+    addAnimationEntry(ui.animations[ui.animations.length-1]);
+  }catch(e){ console.warn('Keyframe add cancelled', e); }
+});
+
+document.getElementById('btnDropMarker').addEventListener('click', async ()=>{
+
+  try{
+    const pts = await capturePoints('Click the map to place a marker (single click)');
+    if(!pts || pts.length===0) return;
+    const color = document.getElementById('markerColor') ? document.getElementById('markerColor').value : '#ff0000';
+    const id = `marker-${Date.now()}`;
+    dropMarker(pts[0], color, {id});
+    ui.animations.push({type:'marker', id, params:{point:pts[0], color}});
+    addAnimationEntry(ui.animations[ui.animations.length-1]);
+  }catch(e){}
+});
+
 document.getElementById('btnClear').addEventListener('click', ()=>{
   if(!confirm('Clear all animations?')) return;
   ui.animations = [];
@@ -412,13 +533,20 @@ document.getElementById('btnClear').addEventListener('click', ()=>{
 });
 
 document.getElementById('btnPlayAll').addEventListener('click', async ()=>{
-  // Switch to viewer so UI hides and we can control map
+  // Clear any previous playback drawings so we start fresh
+  animationLayer.clearLayers();
+  // Ensure keyframe visuals are hidden while playing
+  if(map.hasLayer(keyframeLayer)) map.removeLayer(keyframeLayer);
   setMode('viewer');
+
   for(const a of ui.animations){
     await playAnimation(a);
     await new Promise(r=>setTimeout(r,500));
   }
+
+  // restore editor UI and keyframe visuals
   setMode('editor');
+  if(!map.hasLayer(keyframeLayer)) map.addLayer(keyframeLayer);
 });
 
 // ------------------
@@ -480,8 +608,29 @@ loadAnimationsFromStorage();
 // play a single animation and control map view during playback
 async function playAnimation(a){
   if(a.type==='circle'){
-    map.flyTo(toLatLng(a.params.centre), 16, {duration:1});
-    drawCircle(a.params.centre, a.params.radius, a.params.color);
+    // ensure centre is [lon,lat]
+    function normalizeCoord(pt){ if(!pt || pt.length<2) return pt; const x=Number(pt[0]), y=Number(pt[1]); if(Math.abs(x)<=90 && Math.abs(y)>90) return [y,x]; return [x,y]; }
+    const centre = normalizeCoord(a.params.centre);
+    const radiusMeters = Number(a.params.radius) || 500;
+    // add a small buffer so the circle isn't clipped (12% or minimum 200m)
+    const bufferMeters = Math.max(200, Math.round(radiusMeters * 0.12));
+    const extentKm = (radiusMeters + bufferMeters) / 1000;
+    const pt = turf.point(centre);
+    // compute cardinal points at distance (radius + buffer)
+    const north = turf.destination(pt, extentKm, 0, {units:'kilometers'}).geometry.coordinates;
+    const east  = turf.destination(pt, extentKm, 90, {units:'kilometers'}).geometry.coordinates;
+    const south = turf.destination(pt, extentKm, 180, {units:'kilometers'}).geometry.coordinates;
+    const west  = turf.destination(pt, extentKm, 270, {units:'kilometers'}).geometry.coordinates;
+    const lons = [north[0], east[0], south[0], west[0]];
+    const lats = [north[1], east[1], south[1], west[1]];
+    const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const bounds = L.latLngBounds([L.latLng(minLat, minLon), L.latLng(maxLat, maxLon)]);
+    // fit bounds (with pixel padding) so full circle is visible
+    map.fitBounds(bounds, {duration: FLY_DURATION, padding: [40,40]});
+    // wait for the fitBounds transition to finish before drawing the circle
+    await new Promise(resolve => map.once('moveend', resolve));
+    drawCircle(centre, radiusMeters, a.params.color, {id: a.id});
     await new Promise(r=>setTimeout(r,6000));
   } else if(a.type==='split'){
     // center between points (normalize input to ensure [lon,lat])
@@ -494,15 +643,41 @@ async function playAnimation(a){
     const pa = normalizeCoord(a.params.a);
     const pb = normalizeCoord(a.params.b);
     const mid = [(pa[0]+pb[0])/2, (pa[1]+pb[1])/2];
-    map.flyTo(toLatLng(mid), 15, {duration:1});
+    map.flyTo(toLatLng(mid), 15, {duration: FLY_DURATION});
+    // wait for movement to finish before drawing split
+    await new Promise(resolve => map.once('moveend', resolve));
     splitMap(pa, pb, a.params.side);
     await new Promise(r=>setTimeout(r,6000));
   } else if(a.type==='route'){
     // fit bounds
     const latlngs = a.params.points.map(p=>toLatLng(p));
     const bounds = L.latLngBounds(latlngs);
-    map.fitBounds(bounds.pad ? bounds.pad(0.2) : bounds, {duration:1});
+    map.fitBounds(bounds.pad ? bounds.pad(0.2) : bounds, {duration: FLY_DURATION});
+    // wait for fitBounds transition to finish before drawing the route
+    await new Promise(resolve => map.once('moveend', resolve));
     await drawRoute(a.params.points, a.params.speed, {color: a.params.color});
+  } else if(a.type==='marker'){
+    // show marker and zoom in briefly
+    map.flyTo(toLatLng(a.params.point), 16, {duration: FLY_DURATION});
+    // wait until the map has finished moving before placing the marker
+    await new Promise(resolve => map.once('moveend', resolve));
+    dropMarker(a.params.point, a.params.color);
+    await new Promise(r=>setTimeout(r,500));
+    } else if(a.type==='keyframe'){
+      // fly to stored center and zoom
+      const c = a.params.center;
+      const z = a.params.zoom != null ? a.params.zoom : map.getZoom();
+      try{
+        map.flyTo(toLatLng(c), z, {duration: FLY_DURATION});
+        // wait for the transition to finish so subsequent animations start after movement
+        await new Promise(resolve => map.once('moveend', resolve));
+      }catch(e){
+        // fallback if center malformed
+        console.warn('Invalid keyframe center', e);
+        map.setZoom(z);
+      }
+      // small pause so user can see keyframe
+      await new Promise(r=>setTimeout(r,800));
   }
 }
 
