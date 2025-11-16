@@ -301,6 +301,27 @@ function placeKeyframe(opts={}){
 }
 window.placeKeyframe = placeKeyframe;
 
+// drawPolygon: outline then fill after 5s. points: array of [lon,lat]
+function drawPolygon(points, fillColor='#ff0000', opts={}){
+  if(!points || points.length<3) return null;
+  // convert to Leaflet latlngs
+  const latlngs = points.map(p=> toLatLng(p));
+  const outline = L.polygon(latlngs, {color: opts.outlineColor||'#333', weight: opts.weight||2, fill:false});
+  animationLayer.addLayer(outline);
+  const id = opts.id || `polygon-${Date.now()}`;
+  outline._animId = id;
+  // after 5s fill with chosen colour
+  setTimeout(()=>{
+    // remove outline and add filled polygon (to keep behaviour consistent with drawCircle)
+    animationLayer.removeLayer(outline);
+    const filled = L.polygon(latlngs, {color: opts.outlineColor||'#333', weight: opts.weight||2, fill:true, fillColor: fillColor, fillOpacity: opts.fillOpacity!=null?opts.fillOpacity:0.25});
+    filled._animId = id;
+    animationLayer.addLayer(filled);
+  }, 5000);
+  return id;
+}
+window.drawPolygon = drawPolygon;
+
 
 // Small helper to compute turf.bearing when missing
 // turf.bearing requires two points as features - but older turf builds might differ. Provide fallback implementation if turf.bearing missing
@@ -510,6 +531,18 @@ document.getElementById('btnKeyframe').addEventListener('click', ()=>{
   }catch(e){ console.warn('Keyframe add cancelled', e); }
 });
 
+document.getElementById('btnPolygon').addEventListener('click', async ()=>{
+  try{
+    // capture multiple points until user clicks Stop in the overlay
+    const pts = await capturePoints('Click polygon vertices; press Stop when finished', {multiple:true});
+    if(!pts || pts.length<3){ alert('Need at least 3 points to make a polygon'); return; }
+    const color = prompt('Polygon fill colour (name or hex)', 'purple');
+    const id = `polygon-${Date.now()}`;
+    ui.animations.push({type:'polygon', id, params:{points: pts, color}});
+    addAnimationEntry(ui.animations[ui.animations.length-1]);
+  }catch(e){ /* cancelled */ }
+});
+
 document.getElementById('btnDropMarker').addEventListener('click', async ()=>{
 
   try{
@@ -656,6 +689,11 @@ async function playAnimation(a){
     // wait for fitBounds transition to finish before drawing the route
     await new Promise(resolve => map.once('moveend', resolve));
     await drawRoute(a.params.points, a.params.speed, {color: a.params.color});
+  } else if(a.type==='polygon'){
+    // Draw polygon outline immediately, then fill after 5s. Do NOT move the map.
+    drawPolygon(a.params.points, a.params.color, {id: a.id});
+    // wait slightly longer than fill delay so playback sequencing preserves timing
+    await new Promise(r=>setTimeout(r,6000));
   } else if(a.type==='marker'){
     // show marker and zoom in briefly
     map.flyTo(toLatLng(a.params.point), 16, {duration: FLY_DURATION});
