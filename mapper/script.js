@@ -504,8 +504,9 @@ document.getElementById('btnSplit').addEventListener('click', async ()=>{
     const pts = await capturePoints('Click point A then point B to define the split (two clicks)', {multiple:true});
     if(!pts || pts.length<2) return;
     const side = prompt('Which side to shade after 5s? (A or B)', 'A');
+    const color = prompt('Shade colour (name or hex)', side==='A' ? '#e74c3c' : '#2ecc71');
     const id = `anim-${Date.now()}`;
-    ui.animations.push({type:'split', id, params:{a:pts[0], b:pts[1], side}});
+    ui.animations.push({type:'split', id, params:{a:pts[0], b:pts[1], side, color}});
     addAnimationEntry(ui.animations[ui.animations.length-1]);
   }catch(e){}
 });
@@ -679,7 +680,7 @@ async function playAnimation(a){
     map.flyTo(toLatLng(mid), 15, {duration: FLY_DURATION});
     // wait for movement to finish before drawing split
     await new Promise(resolve => map.once('moveend', resolve));
-    splitMap(pa, pb, a.params.side);
+    splitMap(pa, pb, a.params.side, {color: a.params.color});
     await new Promise(r=>setTimeout(r,6000));
   } else if(a.type==='route'){
     // fit bounds
